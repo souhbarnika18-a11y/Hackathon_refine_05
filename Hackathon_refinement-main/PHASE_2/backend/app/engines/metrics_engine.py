@@ -211,6 +211,7 @@ class ForecastInputMetrics(BaseModel):
     """Deterministic inputs for downstream forecast engines without forecasting."""
 
     remaining_effort_hours: float = Field(default=0.0)
+    effective_project_velocity: float = Field(default=0.0)
     remaining_story_count: int = Field(default=0)
     historical_velocity_hours: float = Field(default=0.0)
     historical_carryover_rate: float = Field(default=0.0)
@@ -255,6 +256,7 @@ class ProjectMetrics(BaseModel):
     # Velocity metrics
     planned_total_velocity: float
     actual_avg_velocity: float
+    effective_project_velocity: float
     velocity_variance: float
     velocity_std_dev: float
 
@@ -394,6 +396,13 @@ class MetricsEngine:
         velocity_metrics = self._build_velocity_metrics(actuals)
         resource_metrics = self._build_resource_metrics(team, work_items)
         resource_sprint_loads = self._build_resource_sprint_loads(team, sprints, work_items)
+        effective_project_velocity = self._calculate_effective_project_velocity(
+            team=team,
+            work_items=work_items,
+            actual_avg_velocity=actual_avg_velocity,
+            planned_total_velocity=planned_velocity,
+            sprints=sprints,
+        )
         carryover_history = self._build_carryover_history(work_items)
         scope_inflation_by_reason = self._build_scope_inflation_by_reason(work_items)
         blocker_metrics = self._build_blocker_metrics(blockers)
@@ -401,7 +410,23 @@ class MetricsEngine:
         planning_metrics = self._build_planning_metrics(actuals, work_items)
         quality_metrics = self._build_quality_metrics(work_items)
         risk_input_metrics = self._build_risk_input_metrics(blocker_metrics, dependency_metrics, resource_metrics, planning_metrics, velocity_metrics, historical_metrics)
-        forecast_input_metrics = self._build_forecast_input_metrics(remaining_effort, actual_avg_velocity, planned_velocity, historical_carryover_rate, completed_sprints, current_sprint_num, len(sprints), team_size, avg_allocation, blocker_metrics, dependency_metrics, total - completed, team, sprints)
+        forecast_input_metrics = self._build_forecast_input_metrics(
+            remaining_effort,
+            actual_avg_velocity,
+            planned_velocity,
+            historical_carryover_rate,
+            completed_sprints,
+            current_sprint_num,
+            len(sprints),
+            team_size,
+            avg_allocation,
+            blocker_metrics,
+            dependency_metrics,
+            total - completed,
+            team,
+            sprints,
+            effective_project_velocity,
+        )
         recommendation_input_metrics = self._build_recommendation_input_metrics(team, sprints, work_items, blockers, dependencies, historical_metrics)
 
         return ProjectMetrics(
@@ -451,6 +476,7 @@ class MetricsEngine:
             risk_input_metrics=risk_input_metrics,
             forecast_input_metrics=forecast_input_metrics,
             recommendation_input_metrics=recommendation_input_metrics,
+            effective_project_velocity=effective_project_velocity,
         )
 
     def _build_executive_metrics(self, total_items: int, completed_items: int, blocked_items: int, remaining_effort_hours: float, current_sprint_number: int, completed_sprints: int, completion_pct: float) -> ExecutiveMetrics:
@@ -723,6 +749,95 @@ class MetricsEngine:
             result[resource.name] = per_sprint
         return result
 
+    def _calculate_effective_project_velocity(
+        self,
+        team: List[Any],
+        work_items: List[Any],
+        actual_avg_velocity: float,
+        planned_total_velocity: float,
+        sprints: List[Any],
+    ) -> float:
+        """Calculate effective project velocity from team capacity, skills, and historical performance."""
+        if not team:
+            return max(actual_avg_velocity, planned_total_velocity, 1.0)
+
+        sprint_days = float(self.project_state.project_info.sprint_duration_days or 10)
+        total_sprints = len(sprints) if sprints else 1
+        planned_avg_velocity = planned_total_velocity / max(total_sprints, 1)
+
+        historical_perf_factor = 1.0
+        if actual_avg_velocity > 0 and planned_avg_velocity > 0:
+            historical_perf_factor = actual_avg_velocity / planned_avg_velocity
+            historical_perf_factor = max(0.5, min(historical_perf_factor, 1.25))
+
+        total_effective_capacity = 0.0
+        for resource in team:
+            total_effective_capacity += self._calculate_resource_effectiveness(
+                resource=resource,
+                work_items=work_items,
+                sprint_days=sprint_days,
+            )
+
+        effective_velocity = total_effective_capacity * historical_perf_factor
+        return max(1.0, effective_velocity)
+
+    def _calculate_resource_effectiveness(self, resource: Any, work_items: List[Any], sprint_days: float) -> float:
+        """Estimate a resource's effective capacity for the current project context."""
+        assignment_match = self._resource_skill_match(resource, work_items)
+        skill_level_factor = self._skill_level_factor(resource.skill_level)
+        return (
+            resource.daily_capacity_hrs
+            * sprint_days
+            * resource.allocation_pct
+            * resource.availability_pct
+            * assignment_match
+            * skill_level_factor
+        )
+
+    def _resource_skill_match(self, resource: Any, work_items: List[Any]) -> float:
+        """Calculate a resource-level skill match factor across assigned work items."""
+        assigned_items = [
+            wi for wi in work_items
+            if wi.assigned_resource in {resource.resource_id, resource.name}
+        ]
+        if not assigned_items:
+            return 0.90
+
+        scores = [
+            self._skill_match_score(resource, wi.required_skill)
+            for wi in assigned_items
+        ]
+        return sum(scores) / len(scores)
+
+    @staticmethod
+    def _skill_level_factor(skill_level: Any) -> float:
+        mapping = {
+            "Junior": 0.85,
+            "Intermediate": 0.95,
+            "Mid": 1.00,
+            "Senior": 1.10,
+            "Advanced": 1.15,
+            "Expert": 1.20,
+        }
+        return mapping.get(str(skill_level), 1.0)
+
+    @staticmethod
+    def _skill_match_score(resource: Any, required_skill: str) -> float:
+        if not required_skill:
+            return 0.90
+
+        required_skill = str(required_skill).strip().lower()
+        primary = str(getattr(resource, "primary_skill", "")).strip().lower()
+        secondary = str(getattr(resource, "secondary_skill", "")).strip().lower()
+
+        if required_skill == primary:
+            return 1.00
+        if required_skill == secondary:
+            return 0.95
+        if required_skill in primary or required_skill in secondary or primary in required_skill or secondary in required_skill:
+            return 0.90
+        return 0.75
+
     def _build_carryover_history(self, work_items: List[Any]) -> List[Dict[str, Any]]:
         """Track work items that have moved between sprints (carryover/slippage)."""
         history = []
@@ -882,7 +997,24 @@ class MetricsEngine:
             scope_volatility_score=planning_metrics.scope_volatility_score,
         )
 
-    def _build_forecast_input_metrics(self, remaining_effort_hours: float, average_velocity_hours: float, planned_velocity_hours: float, historical_carryover_rate: float, completed_sprints: int, current_sprint_number: int, total_sprints: int, team_size: int, avg_allocation: float, blocker_metrics: BlockerMetrics, dependency_metrics: DependencyMetrics, remaining_story_count: int, team: List[Any], sprints: List[Any]) -> ForecastInputMetrics:
+    def _build_forecast_input_metrics(
+        self,
+        remaining_effort_hours: float,
+        average_velocity_hours: float,
+        planned_velocity_hours: float,
+        historical_carryover_rate: float,
+        completed_sprints: int,
+        current_sprint_number: int,
+        total_sprints: int,
+        team_size: int,
+        avg_allocation: float,
+        blocker_metrics: BlockerMetrics,
+        dependency_metrics: DependencyMetrics,
+        remaining_story_count: int,
+        team: List[Any],
+        sprints: List[Any],
+        effective_project_velocity: float,
+    ) -> ForecastInputMetrics:
         """Expose deterministic forecast inputs derived from workbook capacity and remaining workload."""
         remaining_sprints = sum(1 for sprint in sprints if sprint.sprint_number >= current_sprint_number)
         capacity_hours = sum(
@@ -893,6 +1025,7 @@ class MetricsEngine:
         utilization_pct = remaining_effort_hours / max(capacity_hours, 1.0) if capacity_hours else 0.0
         return ForecastInputMetrics(
             remaining_effort_hours=remaining_effort_hours,
+            effective_project_velocity=effective_project_velocity,
             remaining_story_count=remaining_story_count,
             historical_velocity_hours=average_velocity_hours,
             historical_carryover_rate=historical_carryover_rate,

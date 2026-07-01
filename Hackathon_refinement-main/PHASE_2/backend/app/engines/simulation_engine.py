@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Union
 from uuid import uuid4
 
@@ -897,7 +897,7 @@ class ActionApplicatorV2:
     """Apply a recommendation to a cloned ProjectState (V2 - specialized for recommendations)."""
 
     def apply(self, state: ProjectState, rec: Recommendation) -> None:
-        action_name = rec.action_type
+        action_name = str(getattr(rec.action_type, "value", rec.action_type)).strip().lower()
         if action_name == "resolve_blocker":
             self._apply_resolve_blocker(state, rec)
         elif action_name == "reassign_item":
@@ -914,6 +914,22 @@ class ActionApplicatorV2:
             self._apply_remove_dependency_bottleneck(state, rec)
         elif action_name == "add_resource_skill":
             self._apply_add_resource_skill(state, rec)
+        elif action_name == "rebaseline_estimate":
+            self._apply_rebaseline_estimate(state, rec)
+        elif action_name == "pair_reviewer":
+            self._apply_pair_reviewer(state, rec)
+        elif action_name == "escalate_blocker_early":
+            self._apply_escalate_blocker_early(state, rec)
+        elif action_name == "cross_train_backup":
+            self._apply_cross_train_backup(state, rec)
+        elif action_name == "insert_review_gate":
+            self._apply_insert_review_gate(state, rec)
+        elif action_name == "apply_ramp_up_discount":
+            self._apply_apply_ramp_up_discount(state, rec)
+        elif action_name == "resequence_non_critical_item":
+            self._apply_resequence_non_critical_item(state, rec)
+        elif action_name == "swarm_item":
+            self._apply_swarm_item(state, rec)
 
     def apply_many(self, state: ProjectState, recs: List[Recommendation]) -> None:
         """Apply in lexicographic recommendation_id order for determinism."""
@@ -942,9 +958,30 @@ class ActionApplicatorV2:
         resource_id = rec.affected_resource_ids[0] if rec.affected_resource_ids else None
         if not resource_id:
             return
+        target_resource = next((r for r in state.team if r.resource_id == resource_id), None)
+        if target_resource is None:
+            return
+
+        sim_params = getattr(rec, "metadata", {}).get("simulation_params", {}) if getattr(rec, "metadata", None) else {}
+        req_skill = sim_params.get("required_skill")
+
         for item in state.work_items:
-            if item.item_id in rec.affected_item_ids:
-                item.assigned_resource = resource_id
+            if item.item_id not in rec.affected_item_ids:
+                continue
+
+            item.assigned_resource = resource_id
+
+            can_help = False
+            if req_skill and target_resource.primary_skill and str(req_skill).lower() in str(target_resource.primary_skill).lower():
+                can_help = True
+            if target_resource.allocation_pct * target_resource.availability_pct < 0.70:
+                can_help = True
+
+            if can_help:
+                item.remaining_effort_hrs = max(1.0, item.remaining_effort_hrs * 0.92)
+                item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * 0.92)
+                item.progress_pct = min(1.0, item.progress_pct + 0.02)
+                target_resource.allocation_pct = min(1.0, target_resource.allocation_pct + 0.05)
 
     def _apply_split_item(self, state: ProjectState, rec: Recommendation) -> None:
         from copy import deepcopy
@@ -986,6 +1023,11 @@ class ActionApplicatorV2:
         for dep in state.dependencies:
             if dep.predecessor_item_id in rec.affected_item_ids and dep.successor_item_id in rec.affected_item_ids:
                 dep.lag_days = max(0, dep.lag_days - 1)
+                for item in state.work_items:
+                    if item.item_id == dep.successor_item_id:
+                        reduction = item.current_estimate_hrs * 0.1
+                        item.current_estimate_hrs = max(1.0, item.current_estimate_hrs - reduction)
+                        item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs - reduction)
 
     def _apply_rebalance_sprint_load(self, state: ProjectState, rec: Recommendation) -> None:
         resource_id = rec.affected_resource_ids[0] if rec.affected_resource_ids else None
@@ -1006,14 +1048,103 @@ class ActionApplicatorV2:
             return
         for resource in state.team:
             if resource.resource_id == resource_id:
-                # Use the required skill if provided in the recommendation simulation params
-                req_skill = None
-                try:
-                    req_skill = rec.simulation_params.get("required_skill")
-                except Exception:
-                    req_skill = None
+                sim_params = getattr(rec, "metadata", {}).get("simulation_params", {}) if getattr(rec, "metadata", None) else {}
+                req_skill = sim_params.get("required_skill")
                 if req_skill:
                     resource.primary_skill = req_skill
+                resource.allocation_pct = min(1.0, resource.allocation_pct + 0.05)
+                resource.availability_pct = min(1.0, resource.availability_pct + 0.05)
+
+                for sprint in state.sprints:
+                    if sprint.status in {SprintStatus.NOT_STARTED, SprintStatus.IN_PROGRESS}:
+                        sprint.planned_velocity_hrs += 12.0
+
+    def _apply_rebaseline_estimate(self, state: ProjectState, rec: Recommendation) -> None:
+        for item_id in rec.affected_item_ids:
+            item = next((wi for wi in state.work_items if wi.item_id == item_id), None)
+            if item is None:
+                continue
+            scale = 1.15
+            item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * scale)
+            item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs * scale)
+
+    def _apply_pair_reviewer(self, state: ProjectState, rec: Recommendation) -> None:
+        for item_id in rec.affected_item_ids:
+            item = next((wi for wi in state.work_items if wi.item_id == item_id), None)
+            if item is None:
+                continue
+            item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs * 0.95)
+            item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * 0.95)
+
+    def _apply_escalate_blocker_early(self, state: ProjectState, rec: Recommendation) -> None:
+        for blocker_id in rec.affected_blocker_ids:
+            blocker = next((b for b in state.blockers if b.blocker_id == blocker_id), None)
+            if blocker is None:
+                continue
+            if blocker.target_resolution_date is not None:
+                blocker.target_resolution_date = blocker.target_resolution_date - timedelta(days=2)
+            for item_id in getattr(blocker, "impacted_item_ids", []) or []:
+                item = next((wi for wi in state.work_items if wi.item_id == item_id), None)
+                if item is None:
+                    continue
+                item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs * 0.97)
+                item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * 0.97)
+
+    def _apply_cross_train_backup(self, state: ProjectState, rec: Recommendation) -> None:
+        for resource_id in rec.affected_resource_ids:
+            resource = next((r for r in state.team if r.resource_id == resource_id), None)
+            if resource is None:
+                continue
+            resource.allocation_pct = min(1.0, resource.allocation_pct + 0.05)
+            resource.availability_pct = min(1.0, resource.availability_pct + 0.05)
+            for sprint in state.sprints:
+                if sprint.status in {SprintStatus.NOT_STARTED, SprintStatus.IN_PROGRESS}:
+                    sprint.planned_velocity_hrs += 8.0
+
+    def _apply_insert_review_gate(self, state: ProjectState, rec: Recommendation) -> None:
+        for item_id in rec.affected_item_ids:
+            item = next((wi for wi in state.work_items if wi.item_id == item_id), None)
+            if item is None:
+                continue
+            item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs * 0.94)
+            item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * 0.94)
+
+    def _apply_apply_ramp_up_discount(self, state: ProjectState, rec: Recommendation) -> None:
+        for resource_id in rec.affected_resource_ids:
+            resource = next((r for r in state.team if r.resource_id == resource_id), None)
+            if resource is None:
+                continue
+            resource.allocation_pct = max(0.0, resource.allocation_pct - 0.05)
+            resource.availability_pct = max(0.0, resource.availability_pct - 0.05)
+            for sprint in state.sprints:
+                if sprint.status in {SprintStatus.NOT_STARTED, SprintStatus.IN_PROGRESS}:
+                    sprint.planned_velocity_hrs = max(1.0, sprint.planned_velocity_hrs * 0.9)
+
+    def _apply_resequence_non_critical_item(self, state: ProjectState, rec: Recommendation) -> None:
+        for dep in state.dependencies:
+            if dep.predecessor_item_id in rec.affected_item_ids or dep.successor_item_id in rec.affected_item_ids:
+                dep.lag_days = max(0, dep.lag_days - 1)
+                for item in state.work_items:
+                    if item.item_id == dep.successor_item_id:
+                        item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs * 0.97)
+                        item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * 0.97)
+
+    def _apply_swarm_item(self, state: ProjectState, rec: Recommendation) -> None:
+        for item_id in rec.affected_item_ids:
+            item = next((wi for wi in state.work_items if wi.item_id == item_id), None)
+            if item is None:
+                continue
+            item.remaining_effort_hrs = max(0.0, item.remaining_effort_hrs * 0.85)
+            item.current_estimate_hrs = max(1.0, item.current_estimate_hrs * 0.85)
+            break
+        # Create a small trade-off on another item if possible
+        for item in state.work_items:
+            if item.item_id in rec.affected_item_ids:
+                continue
+            if item.status in {WorkItemStatus.NOT_STARTED, WorkItemStatus.IN_PROGRESS}:
+                item.remaining_effort_hrs = item.remaining_effort_hrs + 4.0
+                item.current_estimate_hrs = item.current_estimate_hrs + 4.0
+                break
 
 
 class EngineRunnerV2:

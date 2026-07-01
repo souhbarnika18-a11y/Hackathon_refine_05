@@ -181,6 +181,7 @@ def test_forecast_exposes_structured_explainability():
     assert result.forecast_assumptions is not None
     assert result.forecast_explanation is not None
     assert result.forecast_drivers[0].impact >= result.forecast_drivers[-1].impact
+    assert any(e.name == "Effective project velocity" for e in result.forecast_evidence)
 
 
 def test_no_blockers_leaves_velocity_unchanged():

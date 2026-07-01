@@ -7,6 +7,14 @@ from app.engines.recommendation_engine.models import (
     TradeOff,
 )
 from app.api.routes.recommendations import _recommendation_to_summary
+from app.engines.recommendation_engine.models import (
+    BaselineMetrics,
+    Recommendation,
+    RecommendationAction,
+    SimulatedMetrics,
+    SimulationResult,
+    ConfidenceLevel,
+)
 
 
 def test_recommendation_to_summary_includes_validation_payload() -> None:
@@ -47,3 +55,60 @@ def test_recommendation_to_summary_includes_validation_payload() -> None:
     assert summary.validation is not None
     assert summary.validation.why_selected == ["Meena is overloaded by 38%"]
     assert summary.validation.confidence_label == "HIGH"
+
+
+def test_recommendation_to_summary_includes_simulation_evidence() -> None:
+    recommendation = Recommendation(
+        recommendation_id="rec-002",
+        title="Resolve blocker BLK-1",
+        description="Resolve the blocker to recover schedule.",
+        action_type=RecommendationAction.RESOLVE_BLOCKER,
+        priority_score=0.85,
+        confidence=ConfidenceLevel.MEDIUM,
+        estimated_hours_recovered=20.0,
+        estimated_delay_reduction_days=2.5,
+        estimated_risk_reduction=12.0,
+        affected_item_ids=["WI-2"],
+        affected_resource_ids=[],
+        affected_sprint_ids=["S1"],
+        affected_blocker_ids=["BLK-1"],
+        root_cause_signal_id="sig-2",
+        metadata={},
+    )
+
+    baseline_metrics = BaselineMetrics(
+        on_time_probability=0.35,
+        expected_delay_days=10.0,
+        overall_risk_score=68.0,
+        schedule_risk=45.0,
+        resource_risk=23.0,
+        critical_path_hours=80.0,
+    )
+    simulated_metrics = SimulatedMetrics(
+        on_time_probability=0.48,
+        expected_delay_days=8.0,
+        overall_risk_score=62.0,
+        schedule_risk=40.0,
+        resource_risk=22.0,
+        critical_path_hours=72.0,
+    )
+    simulation_result = SimulationResult(
+        recommendation_ids=["rec-002"],
+        baseline_metrics=baseline_metrics,
+        simulated_metrics=simulated_metrics,
+        delta_on_time_probability=0.13,
+        delta_expected_delay_days=2.0,
+        delta_spillover_risk=0.0,
+        delta_risk_score=6.0,
+        delta_projected_velocity=0.0,
+        seed_used=42,
+        is_positive_impact=True,
+        summary="Simulated blocker resolution improves probability and reduces delay.",
+    )
+
+    summary = _recommendation_to_summary(recommendation, simulation_result=simulation_result)
+    assert summary.simulation_evidence is not None
+    assert summary.simulation_evidence.baseline.on_time_probability == 0.35
+    assert summary.simulation_evidence.simulated.expected_delay_days == 8.0
+    assert summary.simulation_evidence.delta.on_time_probability == 0.13
+    assert "blocker_penalty_hours" in summary.simulation_evidence.forecast_lever_names

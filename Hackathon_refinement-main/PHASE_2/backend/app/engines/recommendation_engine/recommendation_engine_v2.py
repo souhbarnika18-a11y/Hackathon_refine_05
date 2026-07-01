@@ -59,6 +59,7 @@ class RecommendationEngineV2:
         self._upstream: Optional[UpstreamEngineOutputs] = None
         self._cached_recommendations: List[Recommendation] = []
         self._cached_validations: Dict[str, RecommendationValidation] = {}
+        self._cached_simulation_results: Dict[str, SimulationResult] = {}
 
     def generate(self, top_n: int = 10) -> List[Recommendation]:
         """
@@ -95,11 +96,13 @@ class RecommendationEngineV2:
         actionable = [rec for rec in ranked if rec.affected_item_ids or rec.affected_resource_ids or rec.affected_blocker_ids]
         actionable = self._deduplicate(actionable)
 
+        selected_recommendations = actionable[:top_n]
+
         signals_by_id = {signal.signal_id: signal for signal in signals}
         validator = RecommendationValidator(self.project_state, upstream, signals_by_id)
-        self._cached_validations = validator.validate_all(actionable[:top_n])
+        self._cached_validations = validator.validate_all(selected_recommendations)
 
-        self._cached_recommendations = actionable[:top_n]
+        self._cached_recommendations = selected_recommendations
         return list(self._cached_recommendations)
 
     def get_validation(self, recommendation_id: str) -> Optional[RecommendationValidation]:
@@ -116,7 +119,28 @@ class RecommendationEngineV2:
         recommendation = next((rec for rec in self._cached_recommendations if rec.recommendation_id == recommendation_id), None)
         if recommendation is None:
             raise KeyError(f"Recommendation {recommendation_id} not found")
+        existing = self._cached_simulation_results.get(recommendation.recommendation_id)
+        if existing is not None:
+            return existing
         upstream = self._compute_upstream()
+        result = self._run_simulation(recommendation, upstream)
+        self._cached_simulation_results[recommendation.recommendation_id] = result
+        return result
+
+    def get_simulation_result(self, recommendation_id: str) -> Optional[SimulationResult]:
+        if recommendation_id in self._cached_simulation_results:
+            return self._cached_simulation_results[recommendation_id]
+        if not self._cached_recommendations:
+            self.generate()
+        recommendation = next((rec for rec in self._cached_recommendations if rec.recommendation_id == recommendation_id), None)
+        if recommendation is None:
+            return None
+        upstream = self._compute_upstream()
+        result = self._run_simulation(recommendation, upstream)
+        self._cached_simulation_results[recommendation.recommendation_id] = result
+        return result
+
+    def _run_simulation(self, recommendation: Recommendation, upstream: UpstreamEngineOutputs) -> SimulationResult:
         engine = SimulationEngineV2(self.project_state, upstream, simulation_count=self.simulation_count)
         return engine.simulate(recommendation)
 

@@ -6,7 +6,7 @@ Endpoints:
 - POST /api/recommendations/scenario
 """
 from fastapi import APIRouter, HTTPException, Query, Request
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from app.storage import store
 from app.api.models import ApiResponse, ErrorCodes
 from app.engines.dependency_engine import DependencyDAG
@@ -26,7 +26,7 @@ from app.domain.models import ProjectState
 from app.engines.advisor_input_builder import AdvisorInputBuilder
 from app.engines.recommendation_engine.candidate_generator import CandidateGenerator
 from app.engines.recommendation_engine.impact_estimator import ImpactEstimator
-from app.engines.recommendation_engine.models import RecommendationAction, RecommendationValidation, ScoringWeights
+from app.engines.recommendation_engine.models import RecommendationAction, RecommendationValidation, ScoringWeights, SimulationResult
 from app.engines.recommendation_engine.recommendation_engine_v2 import RecommendationEngineV2
 from app.engines.recommendation_engine.signal_detectors import (
     BlockerDetector,
@@ -140,6 +140,63 @@ def _build_action_summary(rec) -> str:
     return rec.title
 
 
+def _build_simulation_metric_snapshot(metrics: Any) -> Dict[str, Any]:
+    return {
+        "on_time_probability": round(getattr(metrics, "on_time_probability", 0.0), 4),
+        "expected_delay_days": round(getattr(metrics, "expected_delay_days", 0.0), 2),
+        "overall_risk_score": round(getattr(metrics, "overall_risk_score", 0.0), 2),
+        "schedule_risk": None if getattr(metrics, "schedule_risk", None) is None else round(metrics.schedule_risk, 2),
+        "resource_risk": None if getattr(metrics, "resource_risk", None) is None else round(metrics.resource_risk, 2),
+        "projected_velocity": None,
+    }
+
+
+def _build_simulation_delta_snapshot(simulation_result: SimulationResult) -> Dict[str, Any]:
+    schedule_risk_delta = None
+    resource_risk_delta = None
+    if getattr(simulation_result.baseline_metrics, "schedule_risk", None) is not None and getattr(simulation_result.simulated_metrics, "schedule_risk", None) is not None:
+        schedule_risk_delta = round(simulation_result.baseline_metrics.schedule_risk - simulation_result.simulated_metrics.schedule_risk, 2)
+    if getattr(simulation_result.baseline_metrics, "resource_risk", None) is not None and getattr(simulation_result.simulated_metrics, "resource_risk", None) is not None:
+        resource_risk_delta = round(simulation_result.baseline_metrics.resource_risk - simulation_result.simulated_metrics.resource_risk, 2)
+    return {
+        "on_time_probability": round(simulation_result.delta_on_time_probability, 4),
+        "expected_delay_days": round(simulation_result.delta_expected_delay_days, 4),
+        "overall_risk_score": round(simulation_result.delta_risk_score, 4),
+        "schedule_risk": schedule_risk_delta,
+        "resource_risk": resource_risk_delta,
+        "projected_velocity": getattr(simulation_result, "delta_projected_velocity", None),
+    }
+
+
+def _get_forecast_lever_names(rec, simulation_result: Optional[SimulationResult]) -> List[str]:
+    lever_map = {
+        "resolve_blocker": ["blocker_penalty_hours", "remaining_days_blocker_loss", "projected_velocity"],
+        "reassign_item": ["projected_velocity", "remaining_days_total", "resource_utilization"],
+        "split_item": ["remaining_effort_hours", "critical_path_remaining_hours"],
+        "advance_item_to_earlier_sprint": ["critical_path_remaining_hours", "remaining_days_total", "projected_velocity"],
+        "parallelize_items": ["critical_path_remaining_hours", "remaining_days_total"],
+        "rebalance_sprint_load": ["projected_velocity", "remaining_days_total"],
+        "remove_dependency_bottleneck": ["critical_path_remaining_hours", "remaining_days_total"],
+        "add_resource_skill": ["projected_velocity", "future_capacity"],
+        "rebaseline_estimate": ["remaining_effort_hours", "scope_growth_hours", "forecast_adjusted_effort_hours"],
+        "pair_reviewer": ["resource_utilization", "risk_score"],
+        "escalate_blocker_early": ["blocker_penalty_hours", "projected_velocity"],
+        "freeze_scope_request": ["remaining_effort_hours", "scope_growth_hours"],
+        "pull_forward_item": ["remaining_days_total", "critical_path_remaining_hours"],
+        "split_and_pair": ["average_item_effort", "resource_utilization"],
+        "assign_as_second_reviewer": ["resource_utilization", "risk_score"],
+        "cross_train_backup": ["resource_risk", "projected_velocity"],
+        "insert_review_gate": ["risk_score", "resource_utilization"],
+        "apply_ramp_up_discount": ["remaining_effort_hours", "forecast_adjusted_effort_hours"],
+        "resequence_non_critical_item": ["critical_path_remaining_hours", "remaining_days_total"],
+        "swarm_item": ["critical_path_remaining_hours", "remaining_days_total"],
+    }
+    names = lever_map.get(rec.action_type.value, ["expected_delay_days", "overall_risk_score"])
+    if simulation_result is not None and getattr(simulation_result, "delta_projected_velocity", None) is not None:
+        names.append("projected_velocity")
+    return sorted(set(names))
+
+
 def _build_resource_load_impact(
     rec,
     project_state: Optional[ProjectState],
@@ -168,6 +225,7 @@ def _recommendation_to_summary(
     metrics: Optional[ProjectMetrics] = None,
     dag: Optional[DependencyDAG] = None,
     validation: Optional[RecommendationValidation] = None,
+    simulation_result: Optional[SimulationResult] = None,
 ) -> RecommendationSummary:
     """
     Convert internal Recommendation to API RecommendationSummary.
@@ -193,11 +251,15 @@ def _recommendation_to_summary(
     baseline_prob = baseline_metrics.get("on_time_probability", 0.0)
     baseline_delay = baseline_metrics.get("expected_delay_days", 0.0)
     baseline_risk = baseline_metrics.get("overall_risk_score", 0.0)
-    
-    # Estimate after-state (simplified: subtract estimated reductions)
-    after_prob = min(1.0, max(0.0, baseline_prob + rec.estimated_risk_reduction / 100.0))
-    after_delay = max(0.0, baseline_delay - rec.estimated_delay_reduction_days)
-    after_risk = max(0.0, baseline_risk - rec.estimated_risk_reduction)
+
+    if simulation_result is not None:
+        after_prob = min(1.0, max(0.0, simulation_result.simulated_metrics.on_time_probability))
+        after_delay = max(0.0, simulation_result.simulated_metrics.expected_delay_days)
+        after_risk = max(0.0, simulation_result.simulated_metrics.overall_risk_score)
+    else:
+        after_prob = min(1.0, max(0.0, baseline_prob + rec.estimated_risk_reduction / 100.0))
+        after_delay = max(0.0, baseline_delay - rec.estimated_delay_reduction_days)
+        after_risk = max(0.0, baseline_risk - rec.estimated_risk_reduction)
     
     # HIGH: Compute real values instead of hardcoding
     implementation_effort = _estimate_implementation_effort(
@@ -246,7 +308,17 @@ def _recommendation_to_summary(
             trade_offs=[TradeOffResponse(description=t.description, severity=t.severity) for t in validation.trade_offs],
             one_line_pitch=validation.one_line_pitch,
         )
-    
+
+    simulation_evidence = None
+    if simulation_result is not None:
+        simulation_evidence = {
+            "baseline": _build_simulation_metric_snapshot(simulation_result.baseline_metrics),
+            "simulated": _build_simulation_metric_snapshot(simulation_result.simulated_metrics),
+            "delta": _build_simulation_delta_snapshot(simulation_result),
+            "forecast_lever_names": _get_forecast_lever_names(rec, simulation_result),
+        }
+
+    impact_classification = "Positive Impact" if (simulation_result.is_positive_impact if simulation_result is not None else rec.estimated_delay_reduction_days > 0.0) else "Negligible Impact"
     return RecommendationSummary(
         recommendation_id=rec.recommendation_id,
         type=_recommendation_type_from_action(rec.action_type),
@@ -265,17 +337,17 @@ def _recommendation_to_summary(
         confidence=rec.confidence.value,
         priority_score=round(rec.priority_score * 100.0, 2),
         baseline_probability=round(baseline_prob, 4),  # CRITICAL FIX: From upstream
-        after_probability=round(after_prob, 4),  # CRITICAL FIX: Estimated
+        after_probability=round(after_prob, 4),  # CRITICAL FIX: Estimated or simulated
         expected_probability_gain=round(after_prob - baseline_prob, 4),  # CRITICAL FIX
         baseline_delay_days=round(baseline_delay, 2),  # CRITICAL FIX: From upstream
-        after_delay_days=round(after_delay, 2),  # CRITICAL FIX: Estimated
-        expected_delay_gain_days=round(rec.estimated_delay_reduction_days, 2),
+        after_delay_days=round(after_delay, 2),  # CRITICAL FIX: Estimated or simulated
+        expected_delay_gain_days=round(baseline_delay - after_delay, 2),
         baseline_risk_score=round(baseline_risk, 2),  # CRITICAL FIX: From upstream
-        after_risk_score=round(after_risk, 2),  # CRITICAL FIX: Estimated
-        expected_risk_reduction=round(rec.estimated_risk_reduction, 2),
+        after_risk_score=round(after_risk, 2),  # CRITICAL FIX: Estimated or simulated
+        expected_risk_reduction=round(baseline_risk - after_risk, 2),
         impact_level=impact_level,  # HIGH FIX: Computed
         impact_confidence=rec.confidence.value,
-        impact_classification="Positive Impact" if rec.estimated_delay_reduction_days > 0.0 else "Negligible Impact",
+        impact_classification=impact_classification,
         business_impact=rec.description,
         impact_summary=rec.description,
         category=category,  # HIGH FIX: Resolved
@@ -285,6 +357,7 @@ def _recommendation_to_summary(
         dependency_consequence=dependency_consequence,
         urgency=urgency,
         blocker_overdue_days=blocker_overdue_days,
+        simulation_evidence=simulation_evidence,
         validation=validation_response,
     )
 
@@ -367,6 +440,7 @@ async def get_recommendations(
                     upstream_metrics,
                     upstream.dag,
                     recommendation_engine.get_validation(rec.recommendation_id),
+                    recommendation_engine.get_simulation_result(rec.recommendation_id),
                 )
                 for rec in candidates
             ],

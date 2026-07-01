@@ -71,7 +71,12 @@ class ForecastEngine:
                 predicted_spillover_items = 0.0
                 spillover_hours = 0.0
 
-        base_velocity = float(self.metrics.actual_avg_velocity or self.metrics.planned_total_velocity or 1.0)
+        base_velocity = float(
+            getattr(self.metrics, "effective_project_velocity", 0.0)
+            or self.metrics.actual_avg_velocity
+            or self.metrics.planned_total_velocity
+            or 1.0
+        )
         blocker_impact = float(getattr(self.metrics, "estimated_blocker_velocity_impact", 0.0) or 0.0)
 
         sprint_days = float(self.project_state.project_info.sprint_duration_days or 14)
@@ -346,6 +351,12 @@ class ForecastEngine:
     def _build_forecast_evidence(self) -> List[ForecastEvidence]:
         """Expose structured evidence values already available through ProjectMetrics."""
         return [
+            ForecastEvidence(
+                name="Effective project velocity",
+                value=getattr(self.metrics, "effective_project_velocity", self.metrics.actual_avg_velocity),
+                unit="hours/sprint",
+                source="MetricsEngine",
+            ),
             ForecastEvidence(name="Historical velocity", value=self.metrics.actual_avg_velocity, unit="hours/sprint", source="MetricsEngine"),
             ForecastEvidence(name="Remaining effort", value=self.metrics.remaining_effort_hours, unit="hours", source="MetricsEngine"),
             ForecastEvidence(name="Critical path remaining effort", value=self.cp_result.critical_path_remaining_hours, unit="hours", source="CriticalPathEngine"),
@@ -359,7 +370,7 @@ class ForecastEngine:
     def _build_assumptions(self) -> ForecastAssumptions:
         """Document forecast assumptions in machine-readable form."""
         return ForecastAssumptions(
-            velocity_calculation_method="projected_velocity = base_velocity * (1 - blocker_impact) * (1 - spillover_fraction * 0.5), floored at 25% of base velocity",
+            velocity_calculation_method="projected_velocity = effective_project_velocity * (1 - blocker_impact) * (1 - spillover_fraction * 0.5), floored at 25% of effective project velocity",
             blocker_adjustment_method="blocker_impact is applied as a multiplicative velocity reduction factor from ProjectMetrics",
             spillover_adjustment_method="predicted spillover is converted to equivalent hours and reduces effective throughput rather than adding a separate additive delay bucket",
             critical_path_handling="critical_path_remaining_hours is used as a lower bound for remaining work so serial dependency effort cannot be under-counted",

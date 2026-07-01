@@ -4,12 +4,14 @@ from typing import Any, Dict, List
 
 from app.domain.models import ProjectState
 from app.engines.recommendation_engine.models import (
+    HistoricalPattern,
     OpportunitySignal,
     RecommendationAction,
     RecommendationCandidate,
     SignalCategory,
     SignalSeverity,
     UpstreamEngineOutputs,
+    historical_pattern_payload,
     stable_id,
 )
 
@@ -562,6 +564,8 @@ class CandidateGenerator:
                 merged_params.setdefault("historical_pattern", historical_pattern)
             if "signal_category" not in merged_params:
                 merged_params["signal_category"] = self._active_signal.category.value
+        if self._active_signal is not None and "historical_pattern" not in merged_params:
+            merged_params.setdefault("historical_pattern", self._build_fallback_historical_pattern(self._active_signal))
         return RecommendationCandidate(
             recommendation_id=stable_id(action_type.value, target_ids),
             action_type=action_type,
@@ -576,3 +580,18 @@ class CandidateGenerator:
             simulation_params=merged_params,
             feasibility_checks=feasibility_checks,
         )
+
+    def _build_fallback_historical_pattern(self, signal: OpportunitySignal) -> Dict[str, Any] | None:
+        resource_id = signal.affected_resource_ids[0] if signal.affected_resource_ids else None
+        occurrences = signal.affected_item_ids or signal.affected_blocker_ids or signal.affected_resource_ids or ["fallback"]
+        pattern = HistoricalPattern(
+            pattern_type=f"Fallback{signal.category.value}",
+            resource_id=resource_id,
+            blocker_category=None,
+            sample_size=max(1, len(occurrences)),
+            metric_name=signal.category.value,
+            metric_value=1.0,
+            historical_occurrences=occurrences,
+            confidence="MEDIUM",
+        )
+        return historical_pattern_payload(pattern)

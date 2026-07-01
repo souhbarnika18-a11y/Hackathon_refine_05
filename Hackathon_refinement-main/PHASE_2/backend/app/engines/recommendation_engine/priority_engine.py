@@ -89,6 +89,12 @@ class PriorityEngine:
             impact.confidence.value if hasattr(impact.confidence, "value") else str(impact.confidence), 1.0
         )
 
+        # Rebaseline estimate recommendations are primarily about forecast quality and uncertainty.
+        # Grant them schedule weighting even when the current baseline delay is zero so they surface
+        # in scenarios where improving estimate reliability is the main actionable signal.
+        if candidate.action_type == RecommendationAction.REBASELINE_ESTIMATE:
+            schedule_factor = 1.0
+
         base_score = (
             self.weights.w_risk * risk_factor
             + self.weights.w_schedule * schedule_factor
@@ -103,5 +109,8 @@ class PriorityEngine:
             RecommendationAction.SWARM_ITEM,
         }:
             base_score = max(base_score, 0.65)
+
+        if candidate.action_type == RecommendationAction.REBASELINE_ESTIMATE:
+            base_score = max(base_score, 0.30)
 
         return base_score * urgency_multiplier * cascade_multiplier * confidence_multiplier

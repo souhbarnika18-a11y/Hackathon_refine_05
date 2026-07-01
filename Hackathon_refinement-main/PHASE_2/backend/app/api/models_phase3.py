@@ -418,6 +418,31 @@ class RecommendationValidationResponse(BaseModel):
     one_line_pitch: str = Field(default="", description="One-line pitch for the recommendation")
 
 
+class RecommendationSimulationMetricSnapshot(BaseModel):
+    on_time_probability: float = Field(..., ge=0.0, le=1.0, description="On-time delivery probability")
+    expected_delay_days: float = Field(..., description="Expected delay in days")
+    overall_risk_score: float = Field(..., description="Overall risk score")
+    schedule_risk: Optional[float] = Field(None, description="Schedule risk score")
+    resource_risk: Optional[float] = Field(None, description="Resource risk score")
+    projected_velocity: Optional[float] = Field(None, description="Projected forecast velocity in hours per sprint")
+
+
+class RecommendationSimulationDeltaMetricSnapshot(BaseModel):
+    on_time_probability: float = Field(..., description="Change in on-time delivery probability (positive improvement, negative deterioration)")
+    expected_delay_days: float = Field(..., description="Change in expected delay in days (positive reduction, negative worsening)")
+    overall_risk_score: float = Field(..., description="Change in overall risk score")
+    schedule_risk: Optional[float] = Field(None, description="Change in schedule risk score")
+    resource_risk: Optional[float] = Field(None, description="Change in resource risk score")
+    projected_velocity: Optional[float] = Field(None, description="Change in projected velocity in hours per sprint")
+
+
+class RecommendationSimulationEvidence(BaseModel):
+    baseline: RecommendationSimulationMetricSnapshot = Field(..., description="Baseline forecast and risk metrics before applying the recommendation")
+    simulated: RecommendationSimulationMetricSnapshot = Field(..., description="Forecast and risk metrics after applying the recommendation")
+    delta: RecommendationSimulationDeltaMetricSnapshot = Field(..., description="Change in forecast and risk metrics attributable to the recommendation")
+    forecast_lever_names: List[str] = Field(default_factory=list, description="Forecast levers expected to change as a result of the recommendation")
+
+
 class RecommendationSummary(BaseModel):
     recommendation_id: str = Field(..., description="Unique recommendation identifier")
     type: RecommendationType = Field(..., description="Recommendation type")
@@ -449,6 +474,7 @@ class RecommendationSummary(BaseModel):
     dependency_consequence: Optional[str] = Field(None, description="Named downstream chain this recommendation protects")
     urgency: Optional[str] = Field(None, description="TODAY, THIS_SPRINT, NEXT_SPRINT, or LATER")
     blocker_overdue_days: Optional[int] = Field(None, description="Days the targeted blocker is past its target resolution date, if applicable")
+    simulation_evidence: Optional[RecommendationSimulationEvidence] = Field(None, description="Baseline/simulated/delta metrics plus forecast levers changed by the recommendation")
     validation: Optional[RecommendationValidationResponse] = Field(None, description="Why this recommendation was selected and how it compares to alternatives")
 
 
