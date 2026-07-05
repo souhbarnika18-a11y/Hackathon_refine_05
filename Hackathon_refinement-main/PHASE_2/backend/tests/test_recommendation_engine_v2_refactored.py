@@ -125,7 +125,7 @@ class TestSignalDetectorConsumption:
                 current_estimate_hrs=20.0,
                 remaining_effort_hrs=10.0,
                 required_skill="Backend",
-                assigned_sprint="sp2",
+                assigned_sprint="Sprint 2",
                 assigned_resource="dev1",
             ),
             WorkItem(
@@ -138,7 +138,7 @@ class TestSignalDetectorConsumption:
                 current_estimate_hrs=25.0,
                 remaining_effort_hrs=25.0,
                 required_skill="Frontend",
-                assigned_sprint="sp3",
+                assigned_sprint="Sprint 3",
                 assigned_resource="dev2",
             ),
             WorkItem(
@@ -151,7 +151,7 @@ class TestSignalDetectorConsumption:
                 current_estimate_hrs=15.0,
                 remaining_effort_hrs=15.0,
                 required_skill="Backend",
-                assigned_sprint="sp2",
+                assigned_sprint="Sprint 2",
                 assigned_resource="dev1",
             ),
         ]
@@ -919,7 +919,7 @@ class TestRecommendationEngineConsistency:
                 current_estimate_hrs=20.0,
                 remaining_effort_hrs=10.0,
                 required_skill="Backend",
-                assigned_sprint="sp2",
+                assigned_sprint="Sprint 2",
                 assigned_resource="dev1",
             ),
         ]

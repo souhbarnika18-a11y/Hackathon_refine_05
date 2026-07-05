@@ -140,14 +140,14 @@ class CandidateGenerator:
         if flag == "UNDERUTILIZED":
             candidates.append(self._build_candidate(
                 action_type=RecommendationAction.REBALANCE_SPRINT_LOAD,
-                title=f"Rebalance sprint load for {resource_id}",
+                title=f"Rebalance sprint load ({resource_id})",
                 description=f"Redistribute work away from underutilized resource {resource_id}",
                 affected_item_ids=signal.affected_item_ids[:2],
                 affected_resource_ids=[resource_id],
                 affected_sprint_ids=signal.affected_sprint_ids,
                 affected_blocker_ids=signal.affected_blocker_ids,
                 root_signal_id=signal.signal_id,
-                simulation_params={"resource_id": resource_id, "load_ratio": load_ratio},
+                simulation_params={"target_resource_id": resource_id, "load_ratio": load_ratio},
                 feasibility_checks={"resource_exists": True, "has_capacity": True},
             ))
             return candidates
@@ -156,7 +156,7 @@ class CandidateGenerator:
             if item_id:
                 candidates.append(self._build_candidate(
                     action_type=RecommendationAction.SPLIT_ITEM,
-                    title=f"Split item ({item_id}) to relieve CP owner {resource_id}",
+                    title=f"Split item to relieve CP owner ({item_id})",
                     description=f"Split work item {item_id} to reduce critical path ownership pressure on {resource_id}",
                     affected_item_ids=[item_id],
                     affected_resource_ids=[resource_id],
@@ -169,7 +169,7 @@ class CandidateGenerator:
             else:
                 candidates.append(self._build_candidate(
                     action_type=RecommendationAction.REASSIGN_ITEM,
-                    title=f"Reassign work from {resource_id}",
+                    title=f"Reassign work ({resource_id})",
                     description=f"Move work away from overloaded resource {resource_id}",
                     affected_item_ids=signal.affected_item_ids,
                     affected_resource_ids=[resource_id],
@@ -184,15 +184,14 @@ class CandidateGenerator:
         if flag == "OVERLOADED" and (len(signal.affected_sprint_ids) > 1 or load_ratio > 1.3 or signal.severity == SignalSeverity.HIGH):
             candidates.append(self._build_candidate(
                 action_type=RecommendationAction.ADD_RESOURCE_SKILL,
-                title=f"Add resource skill for {resource_id}",
+                title=f"Add resource skill ({resource_id})",
                 description=f"Add capacity or skill support for overloaded resource {resource_id}",
                 affected_item_ids=signal.affected_item_ids[:1],
                 affected_resource_ids=[resource_id],
                 affected_sprint_ids=signal.affected_sprint_ids,
                 affected_blocker_ids=signal.affected_blocker_ids,
                 root_signal_id=signal.signal_id,
-                simulation_params={"resource_id": resource_id, "load_ratio": load_ratio},
-                feasibility_checks={"resource_exists": True, "budget_available": True},
+                simulation_params={"target_resource_id": resource_id, "load_ratio": load_ratio},
             ))
             return candidates
 
@@ -352,14 +351,14 @@ class CandidateGenerator:
         item_ids = signal.affected_item_ids[:1]
         candidates.append(self._build_candidate(
             action_type=RecommendationAction.REBASELINE_ESTIMATE,
-            title=f"Rebaseline estimates for {resource_id}",
+            title=f"Rebaseline estimates ({resource_id})",
             description="Adjust estimates using the historical overrun pattern to improve forecast quality.",
             affected_item_ids=item_ids,
             affected_resource_ids=[resource_id],
             affected_sprint_ids=signal.affected_sprint_ids,
             affected_blocker_ids=signal.affected_blocker_ids,
             root_signal_id=signal.signal_id,
-            simulation_params={"resource_id": resource_id},
+            simulation_params={"target_resource_id": resource_id},
             feasibility_checks={"resource_exists": True},
         ))
         return candidates
@@ -404,14 +403,14 @@ class CandidateGenerator:
             return candidates
         candidates.append(self._build_candidate(
             action_type=RecommendationAction.CROSS_TRAIN_BACKUP,
-            title=f"Cross-train backup for {resource_id}",
+            title=f"Cross-train backup ({resource_id})",
             description="Create backup coverage for the single point of failure before it becomes a delivery issue.",
             affected_item_ids=item_ids,
             affected_resource_ids=[resource_id],
             affected_sprint_ids=signal.affected_sprint_ids,
             affected_blocker_ids=signal.affected_blocker_ids,
             root_signal_id=signal.signal_id,
-            simulation_params={"resource_id": resource_id},
+            simulation_params={"target_resource_id": resource_id},
             feasibility_checks={"resource_exists": True},
         ))
         return candidates
@@ -460,26 +459,26 @@ class CandidateGenerator:
             return candidates
         candidates.append(self._build_candidate(
             action_type=RecommendationAction.APPLY_RAMP_UP_DISCOUNT,
-            title=f"Apply ramp-up discount for {resource_id}",
+            title=f"Apply ramp-up discount ({resource_id})",
             description="Use a temporary forecast discount for a newly ramped resource to improve estimate realism.",
             affected_item_ids=item_ids,
             affected_resource_ids=[resource_id],
             affected_sprint_ids=signal.affected_sprint_ids,
             affected_blocker_ids=signal.affected_blocker_ids,
             root_signal_id=signal.signal_id,
-            simulation_params={"resource_id": resource_id},
+            simulation_params={"target_resource_id": resource_id},
             feasibility_checks={"resource_exists": True},
         ))
         candidates.append(self._build_candidate(
             action_type=RecommendationAction.PAIR_REVIEWER,
-            title=f"Pair reviewer with {resource_id}",
+            title=f"Pair reviewer ({resource_id})",
             description="Pair a reviewer with the new joiner on critical path work to reduce rework risk.",
             affected_item_ids=item_ids,
             affected_resource_ids=[resource_id],
             affected_sprint_ids=signal.affected_sprint_ids,
             affected_blocker_ids=signal.affected_blocker_ids,
             root_signal_id=signal.signal_id,
-            simulation_params={"resource_id": resource_id},
+            simulation_params={"target_resource_id": resource_id},
             feasibility_checks={"resource_exists": True},
         ))
         return candidates

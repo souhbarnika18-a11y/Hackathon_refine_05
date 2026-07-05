@@ -405,8 +405,9 @@ class EstimationReliabilityDetector:
 
 
 class SpilloverRootCauseDetector:
-    def __init__(self, project_state: ProjectState) -> None:
+    def __init__(self, project_state: ProjectState, spillover=None) -> None:
         self.project_state = project_state
+        self.spillover = spillover
 
     def detect(self) -> List[OpportunitySignal]:
         signals: List[OpportunitySignal] = []
@@ -416,17 +417,15 @@ class SpilloverRootCauseDetector:
         if not historical_spillover_sprints:
             return signals
         current_sprint = next((s for s in self.project_state.sprints if getattr(s, "status", None) == SprintStatus.IN_PROGRESS), None)
-        relevant_sprint_ids = {getattr(s, "sprint_id", None) for s in self.project_state.sprints if getattr(s, "status", None) in {SprintStatus.IN_PROGRESS, SprintStatus.NOT_STARTED}}
+        # WorkItem.assigned_sprint holds the sprint NAME (see workbook_parser.py), never the sprint_id.
+        # Compare against sprint_name only -- do not reintroduce an id-based or "accept either" check here.
+        relevant_sprint_names = {s.sprint_name for s in self.project_state.sprints if getattr(s, "status", None) in {SprintStatus.IN_PROGRESS, SprintStatus.NOT_STARTED}}
         if current_sprint is not None:
-            relevant_sprint_ids.add(current_sprint.sprint_id)
-        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in self.project_state.sprints}
+            relevant_sprint_names.add(current_sprint.sprint_name)
         target_items = [
             wi for wi in self.project_state.work_items
             if getattr(wi, "status", None) in {WorkItemStatus.NOT_STARTED, WorkItemStatus.IN_PROGRESS, WorkItemStatus.BLOCKED}
-            and (
-                getattr(wi, "assigned_sprint", None) in relevant_sprint_ids
-                or sprint_name_by_id.get(getattr(wi, "assigned_sprint", None)) in relevant_sprint_ids
-            )
+            and getattr(wi, "assigned_sprint", None) in relevant_sprint_names
         ]
         for item in target_items:
             cause = self._classify_cause(item)
@@ -772,9 +771,10 @@ class RampUpDetector:
 
 
 class ResequencingDetector:
-    def __init__(self, project_state: ProjectState, dag: Optional[DependencyDAG] = None) -> None:
+    def __init__(self, project_state: ProjectState, dag: Optional[DependencyDAG] = None, cp_result: Optional[CriticalPathResult] = None) -> None:
         self.project_state = project_state
         self.dag = dag
+        self.cp_result = cp_result
 
     def detect(self) -> List[OpportunitySignal]:
         signals: List[OpportunitySignal] = []
@@ -849,8 +849,9 @@ class ResequencingDetector:
 
 
 class SwarmTradeoffDetector:
-    def __init__(self, project_state: ProjectState) -> None:
+    def __init__(self, project_state: ProjectState, cp_result: Optional[CriticalPathResult] = None) -> None:
         self.project_state = project_state
+        self.cp_result = cp_result
 
     def detect(self) -> List[OpportunitySignal]:
         signals: List[OpportunitySignal] = []

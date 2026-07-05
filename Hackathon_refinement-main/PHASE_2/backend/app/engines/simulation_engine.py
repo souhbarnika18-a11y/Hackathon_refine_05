@@ -66,8 +66,10 @@ class ActionApplicator:
             self._apply_parallelize_work(state, recommendation)
         elif normalized in {"reassign_work", "reassign_item", "rebalance_sprint_load"}:
             self._apply_reassign_work(state, recommendation)
-        elif normalized in {"move_blocker_items", "advance_item_to_earlier_sprint"}:
+        elif normalized == "move_blocker_items":
             self._apply_move_blocker_items(state, recommendation)
+        elif normalized == "advance_item_to_earlier_sprint":
+            self._apply_advance_item(state, recommendation)
         elif normalized in {"split_task", "split_item"}:
             self._apply_split_task(state, recommendation)
         elif normalized in {"critical_path_optimization", "remove_dependency_bottleneck"}:
@@ -251,6 +253,24 @@ class ActionApplicator:
             item = next((wi for wi in state.work_items if wi.item_id == item_id), None)
             if item and item.status == WorkItemStatus.NOT_STARTED:
                 item.status = WorkItemStatus.IN_PROGRESS
+
+    def _apply_advance_item(self, state: ProjectState, action: Union[SimulationAction, Recommendation]) -> None:
+        # Distinct from _apply_move_blocker_items above: this actually moves the item
+        # to an earlier sprint by sprint_number, rather than just flipping its status.
+        # WorkItem.assigned_sprint holds the sprint NAME -- compare/assign by name only.
+        target_ids = list(getattr(action, "affected_item_ids", []) or [])
+        sprint_by_name = {s.sprint_name: s for s in state.sprints}
+        sprints_by_number = sorted(state.sprints, key=lambda s: s.sprint_number)
+        for item in state.work_items:
+            if item.item_id not in target_ids:
+                continue
+            current_sprint = sprint_by_name.get(item.assigned_sprint)
+            if current_sprint is None:
+                continue
+            earlier_candidates = [s for s in sprints_by_number if s.sprint_number < current_sprint.sprint_number]
+            if not earlier_candidates:
+                continue
+            item.assigned_sprint = earlier_candidates[-1].sprint_name
 
     def _apply_split_task(self, state: ProjectState, action: Union[SimulationAction, Recommendation]) -> None:
         target_ids = getattr(action, "target_ids", []) or getattr(action, "affected_item_ids", []) or []
@@ -516,8 +536,10 @@ class SimulationEngine:
             self._apply_parallelize_work(clone, recommendation)
         elif normalized in {"reassign_work", "reassign_item", "rebalance_sprint_load"}:
             self._apply_reassign_work(clone, recommendation)
-        elif normalized in {"move_blocker_items", "advance_item_to_earlier_sprint"}:
+        elif normalized == "move_blocker_items":
             self._apply_move_blocker_items(clone, recommendation)
+        elif normalized == "advance_item_to_earlier_sprint":
+            self._apply_advance_item(clone, recommendation)
         elif normalized in {"split_task", "split_item"}:
             self._apply_split_task(clone, recommendation)
         elif normalized in {"critical_path_optimization", "remove_dependency_bottleneck"}:
@@ -1017,12 +1039,23 @@ class ActionApplicatorV2:
                 state.work_items.append(new_item)
 
     def _apply_advance_item(self, state: ProjectState, rec: Recommendation) -> None:
-        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in state.sprints}
-        target_sprint_id = rec.affected_sprint_ids[0] if rec.affected_sprint_ids else None
-        target_sprint_name = sprint_name_by_id.get(target_sprint_id, target_sprint_id)
+        # affected_sprint_ids is not guaranteed to be ordered [current, target] --
+        # do not trust index [0] as "the destination." Compute the actual earlier
+        # sprint explicitly from sprint_number, and only move items whose current
+        # sprint really is later than that target.
+        sprint_by_name = {s.sprint_name: s for s in state.sprints}
+        sprints_by_number = sorted(state.sprints, key=lambda s: s.sprint_number)
         for item in state.work_items:
-            if item.item_id in rec.affected_item_ids:
-                item.assigned_sprint = target_sprint_name if target_sprint_name else item.assigned_sprint
+            if item.item_id not in rec.affected_item_ids:
+                continue
+            current_sprint = sprint_by_name.get(item.assigned_sprint)
+            if current_sprint is None:
+                continue
+            earlier_candidates = [s for s in sprints_by_number if s.sprint_number < current_sprint.sprint_number]
+            if not earlier_candidates:
+                continue  # already in the earliest sprint -- nothing to advance into
+            target_sprint = earlier_candidates[-1]  # the nearest earlier sprint
+            item.assigned_sprint = target_sprint.sprint_name
 
     def _apply_parallelize_items(self, state: ProjectState, rec: Recommendation) -> None:
         for dep in state.dependencies:
