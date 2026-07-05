@@ -79,13 +79,13 @@ class RecommendationEngineV2:
         signals.extend(CriticalPathDetector(self.project_state, upstream.cp_result, upstream.dag, upstream.impact_scores).detect())
         signals.extend(ScheduleDetector(self.project_state, upstream.forecast, upstream.monte_carlo, upstream.risk_result, upstream.metrics).detect())
         signals.extend(EstimationReliabilityDetector(self.project_state).detect())
-        signals.extend(SpilloverRootCauseDetector(self.project_state).detect())
-        signals.extend(SPOFDetector(self.project_state).detect())
+        signals.extend(SpilloverRootCauseDetector(self.project_state, upstream.spillover).detect())
+        signals.extend(SPOFDetector(self.project_state, upstream.cp_result).detect())
         signals.extend(RecurringBlockerDetector(self.project_state).detect())
         signals.extend(ReworkLoopDetector(self.project_state).detect())
         signals.extend(RampUpDetector(self.project_state).detect())
-        signals.extend(ResequencingDetector(self.project_state).detect())
-        signals.extend(SwarmTradeoffDetector(self.project_state).detect())
+        signals.extend(ResequencingDetector(self.project_state, upstream.dag, upstream.cp_result).detect())
+        signals.extend(SwarmTradeoffDetector(self.project_state, upstream.cp_result).detect())
 
         signals.extend(self._fallback_signals(signals))
 

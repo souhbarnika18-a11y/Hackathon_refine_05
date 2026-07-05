@@ -467,9 +467,11 @@ class SimulationEngine:
         plan: List[Dict[str, Any]] = []
         original_owner_map = {wi.item_id: wi.assigned_resource for wi in self.project_state.work_items}
         resource_name_map = {r.resource_id: r.name for r in clone.team}
+        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in clone.sprints}
+        sprint_ids = {sprint_id, sprint_name_by_id.get(sprint_id)}
 
         for wi in clone.work_items:
-            if wi.assigned_sprint != sprint_id:
+            if wi.assigned_sprint not in sprint_ids:
                 continue
             original_owner_id = original_owner_map.get(wi.item_id)
             current_owner_id = wi.assigned_resource
@@ -1015,9 +1017,12 @@ class ActionApplicatorV2:
                 state.work_items.append(new_item)
 
     def _apply_advance_item(self, state: ProjectState, rec: Recommendation) -> None:
+        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in state.sprints}
+        target_sprint_id = rec.affected_sprint_ids[0] if rec.affected_sprint_ids else None
+        target_sprint_name = sprint_name_by_id.get(target_sprint_id, target_sprint_id)
         for item in state.work_items:
             if item.item_id in rec.affected_item_ids:
-                item.assigned_sprint = rec.affected_sprint_ids[0] if rec.affected_sprint_ids else item.assigned_sprint
+                item.assigned_sprint = target_sprint_name if target_sprint_name else item.assigned_sprint
 
     def _apply_parallelize_items(self, state: ProjectState, rec: Recommendation) -> None:
         for dep in state.dependencies:

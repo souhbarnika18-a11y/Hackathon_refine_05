@@ -308,6 +308,34 @@ def test_simulation_engine_reassign_work_uses_last_affected_resource_as_receiver
     assert reassigned_item.assigned_resource == "R2"
 
 
+def test_simulation_engine_advance_item_moves_to_destination_sprint_name(simulation_engine):
+    clone = simulation_engine.project_state.model_copy(deep=True)
+    item = next(wi for wi in clone.work_items if wi.item_id == "WI-01")
+    item.assigned_sprint = "Sprint 2"
+
+    recommendation = Recommendation(
+        recommendation_id="REC-ADVANCE",
+        title="Advance work item earlier",
+        description="Move work item earlier to the previous sprint.",
+        action_type=RecommendationAction.ADVANCE_ITEM_TO_EARLIER_SPRINT,
+        priority_score=0.9,
+        confidence=ConfidenceLevel.HIGH,
+        estimated_hours_recovered=4.0,
+        estimated_delay_reduction_days=1.0,
+        estimated_risk_reduction=0.1,
+        affected_item_ids=["WI-01"],
+        affected_resource_ids=[],
+        affected_sprint_ids=["S2", "S1"],
+        affected_blocker_ids=[],
+        root_cause_signal_id="SIG-ADVANCE",
+    )
+
+    simulation_engine.applicator.apply(clone, recommendation)
+
+    updated_item = next(wi for wi in clone.work_items if wi.item_id == "WI-01")
+    assert updated_item.assigned_sprint == "Sprint 1"
+
+
 def test_simulation_engine_supports_scenario_api(simulation_engine):
     recommendation = Recommendation(
         recommendation_id="REC-NEW",

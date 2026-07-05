@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.engines.recommendation_engine.models import (
     ImpactEstimate,
@@ -8,6 +8,7 @@ from app.engines.recommendation_engine.models import (
     RecommendationAction,
     RecommendationCandidate,
     ScoringWeights,
+    SignalCategory,
     UpstreamEngineOutputs,
     ConfidenceLevel,
 )
@@ -109,6 +110,10 @@ class PriorityEngine:
             RecommendationAction.SWARM_ITEM,
         }:
             base_score = max(base_score, 0.65)
+
+        signal_category = candidate.simulation_params.get("signal_category") if candidate.simulation_params else None
+        if signal_category == SignalCategory.SPOF.value:
+            base_score = max(base_score, 0.70)
 
         if candidate.action_type == RecommendationAction.REBASELINE_ESTIMATE:
             base_score = max(base_score, 0.30)

@@ -178,7 +178,7 @@ class CapacityDetector:
                 cp_items_owned = [
                     wi.item_id for wi in self.project_state.work_items
                     if wi.assigned_resource in {resource.resource_id, resource.name}
-                    and wi.assigned_sprint == sprint_id
+                    and (wi.assigned_sprint == sprint_id or sprint_by_name.get(wi.assigned_sprint) == sprint_id)
                     and wi.item_id in self.cp_result.items_on_critical_path
                 ]
                 context: Dict[str, Any] = {
@@ -419,10 +419,14 @@ class SpilloverRootCauseDetector:
         relevant_sprint_ids = {getattr(s, "sprint_id", None) for s in self.project_state.sprints if getattr(s, "status", None) in {SprintStatus.IN_PROGRESS, SprintStatus.NOT_STARTED}}
         if current_sprint is not None:
             relevant_sprint_ids.add(current_sprint.sprint_id)
+        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in self.project_state.sprints}
         target_items = [
             wi for wi in self.project_state.work_items
             if getattr(wi, "status", None) in {WorkItemStatus.NOT_STARTED, WorkItemStatus.IN_PROGRESS, WorkItemStatus.BLOCKED}
-            and getattr(wi, "assigned_sprint", None) in relevant_sprint_ids
+            and (
+                getattr(wi, "assigned_sprint", None) in relevant_sprint_ids
+                or sprint_name_by_id.get(getattr(wi, "assigned_sprint", None)) in relevant_sprint_ids
+            )
         ]
         for item in target_items:
             cause = self._classify_cause(item)
@@ -1052,15 +1056,22 @@ class SprintDetector:
         return signals
 
     def _items_in_sprint(self, sprint_id: str) -> List[str]:
-        return [wi.item_id for wi in self.project_state.work_items if getattr(wi, "assigned_sprint", None) == sprint_id]
+        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in self.project_state.sprints}
+        return [
+            wi.item_id for wi in self.project_state.work_items
+            if getattr(wi, "assigned_sprint", None) == sprint_id
+            or sprint_name_by_id.get(getattr(wi, "assigned_sprint", None)) == sprint_id
+        ]
 
     def _is_cp_sprint(self, sprint_id: str) -> bool:
         """Check if any CP items are assigned to this sprint."""
+        sprint_name_by_id = {s.sprint_id: s.sprint_name for s in self.project_state.sprints}
         return any(
             wi.item_id in self.forecast.items_on_critical_path 
             if hasattr(self.forecast, 'items_on_critical_path') else False
             for wi in self.project_state.work_items
             if getattr(wi, "assigned_sprint", None) == sprint_id
+            or sprint_name_by_id.get(getattr(wi, "assigned_sprint", None)) == sprint_id
         )
 
 

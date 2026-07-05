@@ -846,7 +846,7 @@ class RiskEngine:
             # Count blocked and spillover items for this sprint
             sprint_items = [
                 wi for wi in self.project_state.work_items
-                if wi.assigned_sprint == sprint.sprint_id
+                if wi.assigned_sprint == sprint.sprint_id or wi.assigned_sprint == sprint.sprint_name
             ]
             blocked_count = sum(
                 1 for wi in sprint_items if wi.status == WorkItemStatus.BLOCKED

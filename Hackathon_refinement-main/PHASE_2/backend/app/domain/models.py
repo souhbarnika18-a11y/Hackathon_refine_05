@@ -204,7 +204,7 @@ class WorkItem(BaseModel):
     item_id: str = Field(..., description="Unique work item identifier (e.g., WI-001)")
     title: str = Field(..., min_length=1, description="Work item title")
     work_type: WorkItemType = Field(..., description="Type of work (Feature, Story, Task, Bug)")
-    assigned_sprint: str = Field(..., description="Sprint ID where item is assigned")
+    assigned_sprint: str = Field(..., description="Sprint name where item is assigned")
     original_sprint: Optional[str] = Field(None, description="Sprint where item was originally planned")
     assigned_resource: Optional[str] = Field(None, description="Resource ID of assignee")
     required_skill: str = Field(..., description="Primary skill required")
