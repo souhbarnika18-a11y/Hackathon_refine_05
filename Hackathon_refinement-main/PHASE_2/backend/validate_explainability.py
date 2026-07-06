@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-WORKBOOK = "/workspaces/HACKATHON_DEMO_REFINE/reference/TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+WORKBOOK = "PHASE_2/INPUT/TIO2_Sprint_Intelligence_v5_final.xlsx"
 
 
 def approx_equal(a, b, tol=1e-6):

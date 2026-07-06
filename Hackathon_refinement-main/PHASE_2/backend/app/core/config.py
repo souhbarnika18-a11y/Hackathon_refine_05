@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     allowed_extensions: list = [".xlsx"]  # Fixed list, not from .env
 
     # ─── Demo Mode ───────────────────────────────────────────────────────────
-    demo_workbook_path: str = "/workspaces/HACKATHON_DEMO_REFINE/reference/TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+    demo_workbook_path: str = "PHASE_2/INPUT/TIO2_Sprint_Intelligence_v5_final.xlsx"
     frontend_origin: str | None = None
 
     class Config:

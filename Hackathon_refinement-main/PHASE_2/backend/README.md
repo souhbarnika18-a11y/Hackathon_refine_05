@@ -103,7 +103,7 @@ Upload Excel workbook for parsing.
 **Request:**
 ```bash
 curl -X POST http://localhost:8000/api/upload \
-  -F "file=@TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+  -F "file=@TIO2_Sprint_Intelligence_v5_final.xlsx"
 ```
 
 **Response (Success):**

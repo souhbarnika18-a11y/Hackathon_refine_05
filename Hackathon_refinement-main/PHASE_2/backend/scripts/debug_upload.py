@@ -10,10 +10,10 @@ from app.main import app
 
 client = TestClient(app)
 
-file_path = "/workspaces/HACKATHON_DEMO_REFINE/reference/TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+file_path = "PHASE_2/INPUT/TIO2_Sprint_Intelligence_v5_final.xlsx"
 
 with open(file_path, "rb") as f:
-    files = {"file": ("TIO2_Sprint_Intelligence_VALIDATED.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    files = {"file": ("TIO2_Sprint_Intelligence_v5_final.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
     resp = client.post("/api/upload", files=files)
     print("STATUS:", resp.status_code)
     try:

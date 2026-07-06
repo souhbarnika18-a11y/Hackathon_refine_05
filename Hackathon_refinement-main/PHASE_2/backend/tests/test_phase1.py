@@ -182,7 +182,7 @@ class TestWorkbookParser:
     
     def test_parser_with_demo_workbook(self):
         """Test parsing actual demo workbook."""
-        demo_file = "/workspaces/Hackathon/TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+        demo_file = "PHASE_2/INPUT/TIO2_Sprint_Intelligence_v5_final.xlsx"
         
         if not os.path.exists(demo_file):
             pytest.skip(f"Demo workbook not found at {demo_file}")
@@ -413,7 +413,7 @@ class TestIntegration:
     
     def test_parse_validate_store_flow(self):
         """Test full parse -> validate -> store flow."""
-        demo_file = "/workspaces/Hackathon/TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+        demo_file = "PHASE_2/INPUT/TIO2_Sprint_Intelligence_v5_final.xlsx"
         
         if not os.path.exists(demo_file):
             pytest.skip(f"Demo workbook not found at {demo_file}")

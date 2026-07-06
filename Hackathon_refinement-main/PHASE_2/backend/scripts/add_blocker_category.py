@@ -1,7 +1,7 @@
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment
 
-WORKBOOK_PATH = "step_6/reference/TIO2_Sprint_Intelligence_VALIDATED.xlsx"
+WORKBOOK_PATH = "PHASE_2/INPUT/TIO2_Sprint_Intelligence_v5_final.xlsx"
 
 CATEGORY_MAP = {
     "BLK-001": "External Team Dependency",
